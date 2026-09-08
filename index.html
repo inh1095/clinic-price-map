@@ -695,6 +695,9 @@ p.secdesc{font-size:13.5px;color:var(--ink2);line-height:1.75;margin:0 0 12px}
 input[type=search]{flex:1 1 260px;min-width:0;padding:10px 13px;border:1px solid var(--line);border-radius:9px;
   background:var(--surface);color:var(--ink);font:inherit;font-size:14.5px}
 input[type=search]:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+select{padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--surface);
+  color:var(--ink);font:inherit;font-size:14px;max-width:46vw}
+select:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
 .chips{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px}
 .chip{border:1px solid var(--line);background:var(--surface);color:var(--ink2);border-radius:999px;
   padding:5px 11px;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap}
@@ -744,7 +747,15 @@ footer{margin-top:34px;padding-top:16px;border-top:1px solid var(--line);font-si
 
   <div class="controls">
     <input type="search" id="q" placeholder="시술명 검색 — 울쎄라, 보톡스, 리쥬란, 제모…" aria-label="시술명 검색">
+    <select id="sort" aria-label="정렬 기준">
+      <option value="price">싼 가격순</option>
+      <option value="disc">할인율순</option>
+      <option value="unit">단위당 가격순</option>
+      <option value="chg">최근 가격 변동순</option>
+    </select>
+    <select id="brand" aria-label="브랜드(체인) 필터"><option value="">브랜드 전체</option></select>
   </div>
+  <div class="chips" id="cats" role="group" aria-label="시술 분류 필터"></div>
   <div class="chips" id="chips" role="group" aria-label="지역 필터"></div>
 
   <div id="map" role="region" aria-label="병원 위치 지도"></div>
@@ -788,19 +799,22 @@ const md = d => d ? d.replace(/^\d{4}-0?(\d+)-0?(\d+)$/, "$1/$2") : "";
 
 // ---------- 데이터 정리 ----------
 let C = [], rows = [], regs = [];
-let CNS = [], UNS = [], ARS = [], DVS = [], TRS = [], PKG = -1, HOE = -1;
+let CNS = [], UNS = [], ARS = [], DVS = [], TRS = [], CTS = [], BDS = [], DTS = [], PKG = -1, HOE = -1;
 // '[울쎄라 시술 시 옵션가] 아쿠아필' 처럼 접두에서만 걸린 항목은 그 시술 본품이 아니다 —
 // 지도 색·최저 표시는 본품이 있으면 본품만 쓴다(옵션가가 싸서 병원이 싸 보이는 착시 방지).
 const core = r => !q || r.nc.includes(q);
 function prepare(){
   C = DATA.c;                                      // 병원 배열(인덱스 = 항목의 ci)
   CNS = DATA.cn || []; UNS = DATA.un || []; TRS = DATA.tr || []; ARS = DATA.ar || []; DVS = DATA.dv || [];
+  CTS = DATA.ct || []; BDS = DATA.bd || []; DTS = DATA.dts || [];
   PKG = TRS.indexOf("패키지"); HOE = UNS.indexOf("회");
   // 인덱스 4 이후는 시술명 정규화 사전(data/canon/names.json)이 붙인 값. 사전이 없으면 undefined 다.
-  rows = DATA.it.map(([ci, n, p, o, cn, un, qty, ses, tr, uns, ar, dv]) => {
+  rows = DATA.it.map(([ci, n, p, o, cn, un, qty, ses, tr, uns, ar, dv, ct, ch]) => {
     const r = {ci, n, nl:n.toLowerCase(),
       nc:n.replace(/^\[[^\]]*\]\s*/, "").toLowerCase(), p, o:o||null,
-      cn:cn ?? -1, un:un ?? -1, qty:qty || 0, ses:ses || 0, tr:tr ?? -1, uns:!!uns, ar:ar ?? -1, dv:dv ?? -1};
+      cn:cn ?? -1, un:un ?? -1, qty:qty || 0, ses:ses || 0, tr:tr ?? -1, uns:!!uns, ar:ar ?? -1, dv:dv ?? -1,
+      ct:ct ?? -1, ch:(ch && ch.length === 4) ? ch : null,
+      dp:(o && o > p) ? (o - p) / o : -1};
     // 단가 비교가 성립하는 항목만 그룹 키를 갖는다. 축에 area·device 를 넣는 이유:
     // '주름 보톡스 1부위' 중위가가 국산 11,000원 / 독일산 40,000원 / 미국산 75,000원(6.8배)이고
     // 'FCR 필링' 은 바디냐 얼굴전체냐로 갈린다 — 빼고 묶으면 순위가 거짓이 된다.
@@ -815,6 +829,7 @@ function prepare(){
   regs = [...new Set(C.map(c=>c.r))].sort((a,b)=>a.localeCompare(b,"ko"));
 }
 let q = "", sido = null, reg = null, pick = null, cmp = null, noTrial = true;
+let cat = null, brand = null, sortBy = "price", onlyChg = false;   // 분류·브랜드·정렬·가격변동만
 // pick = 지도에서 고른 병원, cmp = 비교 중인 시술 그룹, noTrial = 체험가(첫방문 1회성) 제외
 // HANDOVER 5절: 체험가(1회성)와 한정가(반복)는 같은 축에 섞지 않되 통합 축도 병행한다 —
 // 기본은 통합(태그로 구분)이고 이 토글로 체험가만 걷어낸다.
@@ -856,8 +871,50 @@ function cmpBest(g){                                // 병원마다 가장 싼 �
 }
 
 const inReg = c => (!reg || c.r === reg) && (!sido || c.r.startsWith(sido + " "));
+const md2 = d => d ? d.replace(/^\d{4}-0?(\d+)-0?(\d+)$/, "$1/$2") : "";
+function passExtra(r){
+  return (cat === null || r.ct === cat)
+      && (brand === null || C[r.ci].b === brand)
+      && (!onlyChg || !!r.ch);
+}
 function filtered(){
-  return rows.filter(r => (!q || r.nl.includes(q)) && (pick===null ? inReg(C[r.ci]) : r.ci===pick));
+  return rows.filter(r => (!q || r.nl.includes(q)) && passExtra(r)
+    && (pick===null ? inReg(C[r.ci]) : r.ci===pick));
+}
+// 정렬 — 본품(옵션가 아님)을 늘 먼저 둔다. 그래야 '이 시술 어디가 싼가'가 위에 온다.
+const SORTS = {
+  price: (a,b)=> (core(b)-core(a)) || a.p-b.p,
+  disc:  (a,b)=> (core(b)-core(a)) || (b.dp-a.dp) || a.p-b.p,
+  unit:  (a,b)=> (core(b)-core(a)) || ((a.up==null?Infinity:a.up)-(b.up==null?Infinity:b.up)) || a.p-b.p,
+  chg:   (a,b)=> ((b.ch?1:0)-(a.ch?1:0)) || ((b.ch?b.ch[2]:-1)-(a.ch?a.ch[2]:-1)) || a.p-b.p,
+};
+
+// ---------- 시술 분류 칩 + 가격 변동 칩 ----------
+// 강남언니·바비톡 둘 다 분류 필터를 두고 있는데 우리는 없었다. build_site 의 category() 를 항목마다 실어
+// 같은 축으로 나눈다. '가격 변동' 은 반대로 두 곳 다 없는 우리 강점이다(실제 관측 12시점).
+function renderCats(){
+  const box = document.getElementById("cats");
+  if (!CTS.length){ box.textContent = ""; return; }
+  const base = rows.filter(r => (!q || r.nl.includes(q))
+    && (brand === null || C[r.ci].b === brand) && (pick===null ? inReg(C[r.ci]) : r.ci===pick));
+  const cnt = new Map();
+  base.forEach(r => { if (r.ct >= 0) cnt.set(r.ct, (cnt.get(r.ct) || 0) + 1); });
+  box.textContent = "";
+  const mk = (label, on, fn) => {
+    const b = document.createElement("button");
+    b.className = "chip"; b.type = "button"; b.textContent = label;
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+    b.onclick = fn; box.appendChild(b); return b;
+  };
+  mk(`분류 전체 ${base.length.toLocaleString("ko-KR")}`, cat === null, ()=>{ cat = null; render(); });
+  [...cnt.entries()].sort((a,b)=> b[1]-a[1]).forEach(([ci2, n]) =>
+    mk(`${CTS[ci2]} ${n.toLocaleString("ko-KR")}`, cat === ci2, ()=>{ cat = (cat === ci2 ? null : ci2); render(); }));
+  const nchg = base.filter(r => r.ch).length;
+  if (nchg){
+    const sep = document.createElement("span");
+    sep.style.cssText = "opacity:.4;padding:0 4px"; sep.textContent = "|"; box.appendChild(sep);
+    mk(onlyChg ? `가격 변동만 ${nchg}` : `가격 변동 ${nchg}`, onlyChg, ()=>{ onlyChg = !onlyChg; render(); });
+  }
 }
 
 // ---------- 지역 칩 ----------
@@ -956,6 +1013,17 @@ document.addEventListener("click", e=>{           // 팝업 안 '이 병원만 �
 });
 
 // ---------- 표 ----------
+// 가격 변동 배지. 실제 관측만 센 이력이라 '이월된 값'을 변동으로 오인하지 않는다(build_public.price_history).
+function chgTag(r){
+  if (!r.ch) return "";
+  const [pv, pdi, si, lo] = r.ch;
+  const down = r.p < pv;
+  const when = DTS[si] ? md2(DTS[si]) : "";
+  return ` <span class="tag ${down?"cheap":""}" title="${DTS[pdi]||""} 관측 ${fmt(pv)} → ${DTS[si]||""} 관측 ${fmt(r.p)}">` +
+    `${down?"▼":"▲"} ${fmt(pv)}${when?" · "+when:""}</span>` +
+    (lo ? ` <span class="tag cheap">관측 최저</span>` : "");
+}
+
 function table(list){
   if (!list.length) return `<p class="secdesc">해당 조건에 맞는 항목이 없습니다.</p>`;
   const shown = list.slice(0, 200);
@@ -964,7 +1032,8 @@ function table(list){
     `<th class="num">할인</th><th>병원</th><th>지역</th></tr></thead><tbody>` +
     shown.map(r => {
       const c = C[r.ci];
-      return `<tr><td>${esc(r.n)}${q&&!core(r)?' <span class="tag">옵션가</span>':(r.p===cheapest&&q?' <span class="tag cheap">최저</span>':"")}</td>` +
+      return `<tr><td>${esc(r.n)}${q&&!core(r)?' <span class="tag">옵션가</span>':(r.p===cheapest&&q?' <span class="tag cheap">최저</span>':"")}` +
+        `${chgTag(r)}</td>` +
         `<td class="num">${fmt(r.p)}</td><td class="num">${r.o?fmt(r.o):"—"}</td>` +
         `<td class="num">${r.o?Math.round((r.o-r.p)/r.o*100)+"%":"—"}</td>` +
         `<td>${c.u?`<a href="${esc(c.u)}" target="_blank" rel="noopener noreferrer">${esc(c.l)}</a>`:esc(c.l)}` +
@@ -1049,7 +1118,8 @@ function cmpTable(g){
 // ---------- 렌더 ----------
 function render(){
   // 본품(옵션가 아님) 먼저, 그 안에서 가격 낮은 순 — 그래야 "이 시술 어디가 싼가"가 위에 온다
-  const list = filtered().sort((a,b)=>(core(b)-core(a)) || a.p-b.p);
+  const list = filtered().sort(SORTS[sortBy] || SORTS.price);
+  renderCats();
   renderChips();
   renderCmp(list);
   drawMap(list);
@@ -1057,15 +1127,33 @@ function render(){
   document.getElementById("desc").innerHTML =
     `<b>${list.length.toLocaleString("ko-KR")}건</b> · 병원 ${nc}곳` +
     (q ? ` · '<b>${esc(q)}</b>' 검색` : "") + (pick!==null ? ` · <b>${esc(C[pick].l)}</b>만 보는 중` : "");
-  // 검색어도 구/시도 없이 전체를 가격순으로 펼치면 '점 제거 100원'류만 200줄 나온다
-  document.getElementById("tbl").innerHTML = (!q && !reg && pick===null && list.length > 200)
+  // 아무것도 안 좁힌 채 전체를 가격순으로 펼치면 '점 제거 100원'류만 200줄 나온다 —
+  // 그때만 안내를 띄운다. 분류·브랜드·가격변동 필터도 '좁힌 것'으로 센다(예: 가격 변동 507건은 표로 보여야 한다).
+  const narrowed = !!q || !!reg || pick !== null || cat !== null || brand !== null || onlyChg;
+  document.getElementById("tbl").innerHTML = (!narrowed && list.length > 200)
     ? `<p class="secdesc">병원 ${nc}곳 · ${list.length.toLocaleString("ko-KR")}건입니다. ` +
-      `<b>시술명을 검색</b>하거나 지도에서 <b>병원 핀</b>을 누르면 가격 낮은 순으로 보여줍니다.</p>`
+      `<b>시술명을 검색</b>하거나 위의 <b>분류·지역·브랜드</b>를 고르거나 지도에서 <b>병원 핀</b>을 누르면 ` +
+      `가격 낮은 순으로 보여줍니다.</p>`
     : table(list);
 }
 document.getElementById("q").addEventListener("input", e=>{
   q = e.target.value.trim().toLowerCase(); pick = null; render();
 });
+document.getElementById("sort").addEventListener("change", e=>{ sortBy = e.target.value; render(); });
+document.getElementById("brand").addEventListener("change", e=>{
+  brand = e.target.value === "" ? null : +e.target.value; pick = null; render();
+});
+function initBrand(){
+  const sel = document.getElementById("brand");
+  const cnt = new Map();
+  C.forEach(c => { if (c.b >= 0 && BDS[c.b]) cnt.set(c.b, (cnt.get(c.b) || 0) + 1); });
+  [...cnt.entries()].filter(([, n]) => n >= 2).sort((a,b)=> b[1]-a[1] || BDS[a[0]].localeCompare(BDS[b[0]],"ko"))
+    .forEach(([bi, n]) => {
+      const o = document.createElement("option");
+      o.value = String(bi); o.textContent = `${BDS[bi]} ${n}곳`;
+      sel.appendChild(o);
+    });
+}
 document.getElementById("src").innerHTML =
   `가격은 각 병원 홈페이지 게시분을 하루 한 번 자동 수집합니다. 병원마다 갱신 주기가 달라 표의 날짜 표시를 확인하세요.`;
 
@@ -1075,6 +1163,7 @@ function boot(){
   document.getElementById("sub").innerHTML =
     `병원 <b>${C.length}곳</b> · 시술 <b>${DATA.it.length.toLocaleString("ko-KR")}건</b> · ${md(DATA.date)} 기준` +
     (noGeo ? ` · <span class="tag">좌표 미확인 ${noGeo}곳은 지도에 없고 표에만 있습니다</span>` : "");
+  initBrand();
   initMap();
   render();
 }

@@ -814,7 +814,7 @@ function prepare(){
   C.forEach((c,i)=>{ c.i = i; });
   regs = [...new Set(C.map(c=>c.r))].sort((a,b)=>a.localeCompare(b,"ko"));
 }
-let q = "", sido = null, reg = null, pick = null, cmp = null, noTrial = false;
+let q = "", sido = null, reg = null, pick = null, cmp = null, noTrial = true;
 // pick = 지도에서 고른 병원, cmp = 비교 중인 시술 그룹, noTrial = 체험가(첫방문 1회성) 제외
 // HANDOVER 5절: 체험가(1회성)와 한정가(반복)는 같은 축에 섞지 않되 통합 축도 병행한다 —
 // 기본은 통합(태그로 구분)이고 이 토글로 체험가만 걷어낸다.
@@ -1003,7 +1003,7 @@ function renderCmp(list){
     if (nTrial){
       const t = document.createElement("button");
       t.className = "chip"; t.type = "button";
-      t.textContent = noTrial ? "체험가 제외 중" : `체험가 제외 (${nTrial}건)`;
+      t.textContent = noTrial ? `체험가 ${nTrial}건 제외 중` : `체험가 ${nTrial}건 포함 중`;
       t.setAttribute("aria-pressed", noTrial ? "true" : "false");
       t.onclick = ()=>{ noTrial = !noTrial; render(); };
       const sep = document.createElement("span");
@@ -1013,7 +1013,8 @@ function renderCmp(list){
   }
   document.getElementById("cmpdesc").innerHTML = cmp
     ? `<b>${esc(gLabel(cmp))}</b> — 회차·수량을 나눠 <b>단위당 가격</b>으로 줄 세웠습니다. ` +
-      `병원마다 가장 싼 것 하나만 싣고, 조합 패키지와 표기가 모호한 항목은 제외했습니다.`
+      `병원마다 가장 싼 것 하나만 싣고, 조합 패키지와 표기가 모호한 항목은 제외했습니다.` +
+      (noTrial ? ` <b>첫방문 1회 체험가는 제외</b>했습니다 — 정규가와 같은 줄에 세우면 배수가 왜곡됩니다(실측 최대 282배→75배). 칩으로 포함할 수 있습니다.` : ` <b>체험가를 포함</b>한 상태입니다 — 첫방문 1회성 가격이 섞여 있으니 티어 태그를 보세요.`)
     : `병원마다 시술명 표기가 달라 검색만으로는 같은 시술이 흩어집니다. ` +
       `아래에서 시술을 고르면 <b>회차·샷·cc 를 나눈 단위당 가격</b>으로 병원을 줄 세웁니다` +
       `${q ? ` ('<b>${esc(q)}</b>' 검색 결과에 있는 시술)` : ""}. 장비·부위가 다르면 다른 항목으로 나눕니다.`;
@@ -1024,6 +1025,7 @@ function cmpTable(g){
   const best = cmpBest(g);
   if (!best.length) return "";
   const lo = best[0].r.up, hi = best[best.length-1].r.up;
+  const mid = best[Math.floor(best.length/2)].r.up;   // 최저·최고만 보면 미끼 가격에 눈금이 끌린다 — 중위를 같이 준다
   return `<table><thead><tr><th class="num">#</th><th>병원</th><th>지역</th><th>원문 시술명</th>` +
     `<th class="num">판매가</th><th class="num">단위당</th><th class="num">최저 대비</th></tr></thead><tbody>` +
     best.map((e, i) => {
@@ -1040,7 +1042,8 @@ function cmpTable(g){
         `<td class="num">${i===0?"—":"×"+(r.up/lo).toFixed(1)}</td></tr>`;
     }).join("") + `</tbody></table>` +
     `<p class="dealnote">병원 ${best.length}곳 · 단위당 ${esc(fmtUp(lo,un))} ~ ${esc(fmtUp(hi,un))}` +
-    ` (${(hi/lo).toFixed(1)}배 차이). 부가세 표기가 없는 병원은 세전일 수 있어 그대로 비교되지 않습니다.</p>`;
+    ` (${(hi/lo).toFixed(1)}배 차이) · <b>중위 ${esc(fmtUp(mid,un))}</b>.` +
+    ` 최저값은 미끼 성격일 수 있어 중위와 함께 보세요. 부가세 표기가 없는 병원은 세전일 수 있어 그대로 비교되지 않습니다.</p>`;
 }
 
 // ---------- 렌더 ----------

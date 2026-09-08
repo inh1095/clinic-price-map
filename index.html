@@ -730,6 +730,13 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
 .tag.vat{background:var(--warn-bg);color:var(--warn);border-color:transparent}
 .tag.cheap{background:var(--good-bg);color:var(--good);border-color:transparent;font-weight:600}
 .dealnote{font-size:12px;color:var(--ink2);margin:10px 0 0}
+.cbox{border:1px solid var(--line);border-radius:12px;background:var(--surface);box-shadow:var(--shadow);
+  padding:13px 15px;margin:0 0 12px}
+.cbox h3{font-family:"Hahmlet","Noto Sans KR",serif;font-size:16.5px;margin:0 0 6px}
+.cbox .meta{font-size:12.5px;color:var(--ink2);line-height:1.8}
+.cbox .meta b{color:var(--ink);font-weight:500}
+.pickbtn{border:0;background:none;color:var(--acc-ink);font:inherit;font-size:11px;cursor:pointer;padding:0 2px;
+  text-decoration:underline;text-underline-offset:2px}
 footer{margin-top:34px;padding-top:16px;border-top:1px solid var(--line);font-size:12px;color:var(--ink2);line-height:1.8}
 </style>
 
@@ -768,6 +775,7 @@ footer{margin-top:34px;padding-top:16px;border-top:1px solid var(--line);font-si
 
   <h2 class="sec">이벤트 판매가</h2>
   <p class="secdesc" id="desc"></p>
+  <div id="clinic"></div>
   <div id="tbl"></div>
 
   <footer>
@@ -1037,6 +1045,7 @@ function table(list){
         `<td class="num">${fmt(r.p)}</td><td class="num">${r.o?fmt(r.o):"—"}</td>` +
         `<td class="num">${r.o?Math.round((r.o-r.p)/r.o*100)+"%":"—"}</td>` +
         `<td>${c.u?`<a href="${esc(c.u)}" target="_blank" rel="noopener noreferrer">${esc(c.l)}</a>`:esc(c.l)}` +
+        `${pick===null?` <button class="pickbtn" type="button" data-pick2="${r.ci}">이 병원만</button>`:""}` +
         `${c.v==="별도"?' <span class="tag vat">VAT 별도</span>':""}` +
         `${c.d!==DATA.date?` <span class="tag" title="${c.d} 수집">${md(c.d)}</span>`:""}</td>` +
         `<td>${esc(c.r)}</td></tr>`;
@@ -1115,12 +1124,102 @@ function cmpTable(g){
     ` 최저값은 미끼 성격일 수 있어 중위와 함께 보세요. 부가세 표기가 없는 병원은 세전일 수 있어 그대로 비교되지 않습니다.</p>`;
 }
 
+// ---------- 공유 가능한 URL ----------
+// 두 경쟁 플랫폼은 필터를 걸면 주소가 바뀌어 링크 하나로 그 화면이 전달된다. 우리는 어떤
+// 조합을 찾아내도 주소창이 그대로여서 공유·북마크가 불가능했다. 상태를 해시에 싣는다.
+// 인덱스가 아니라 **이름**으로 싣는다 — 데이터는 매일 다시 만들어지고 병원이 늘면 인덱스가
+// 전부 밀린다. 어제 공유한 링크가 오늘 다른 시술을 가리키면 없는 것보다 나쁘다.
+function gFromLabel(s){
+  const seen = new Set();
+  for (const r of rows) if (r.g && !seen.has(r.g)){ seen.add(r.g); if (gLabel(r.g) === s) return r.g; }
+  return null;
+}
+function writeURL(){
+  const p = new URLSearchParams();
+  if (q) p.set("q", q);
+  if (sido) p.set("sido", sido);
+  if (reg) p.set("reg", reg);
+  if (cat !== null && CTS[cat]) p.set("cat", CTS[cat]);
+  if (brand !== null && BDS[brand]) p.set("brand", BDS[brand]);
+  if (pick !== null && C[pick]) p.set("pick", C[pick].l);
+  if (cmp) p.set("cmp", gLabel(cmp));
+  if (sortBy !== "price") p.set("sort", sortBy);
+  if (onlyChg) p.set("chg", "1");
+  if (!noTrial) p.set("trial", "1");        // 기본이 '체험가 제외' 라 켠 경우만 싣는다
+  // URLSearchParams 는 공백을 '+' 로 쓴다. 읽을 때는 둘 다 공백으로 풀리지만, 메신저에 붙여넣으면
+  // '+' 가 그대로 보이거나 링크 인식에서 잘리는 곳이 있다 — 공유용이라 %20 으로 바꿔 둔다.
+  const h = p.toString().replace(/\+/g, "%20");
+  const want = location.pathname + location.search + (h ? "#" + h : "");
+  // replaceState 다 — 검색어를 한 글자 칠 때마다 히스토리가 쌓이면 뒤로가기가 못 쓰게 된다
+  if (location.pathname + location.search + location.hash !== want)
+    history.replaceState(null, "", want);
+}
+function readURL(){
+  const p = new URLSearchParams(location.hash.replace(/^#/, ""));
+  const g = k => (p.get(k) || "").trim();
+  const qs = g("q");
+  q = qs.toLowerCase();
+  document.getElementById("q").value = qs;
+  sido = g("sido") || null;
+  reg = g("reg") || null;
+  if (reg && !regs.includes(reg)) reg = null;          // 없어진 지역이면 무시한다
+  if (reg) sido = reg.split(" ")[0];
+  const ci = CTS.indexOf(g("cat"));   cat = ci >= 0 ? ci : null;
+  const sel = document.getElementById("brand");
+  const bi = BDS.indexOf(g("brand"));
+  brand = (bi >= 0 && [...sel.options].some(o => o.value === String(bi))) ? bi : null;
+  sel.value = brand === null ? "" : String(brand);     // 2곳 미만으로 줄어든 체인은 목록에 없다
+  const pi = C.findIndex(c => c.l === g("pick"));  pick = pi >= 0 ? pi : null;
+  cmp = g("cmp") ? gFromLabel(g("cmp")) : null;
+  sortBy = SORTS[g("sort")] ? g("sort") : "price";
+  document.getElementById("sort").value = sortBy;
+  onlyChg = g("chg") === "1";
+  noTrial = g("trial") !== "1";
+}
+// 사용자가 주소창의 해시를 직접 바꾸거나 링크를 같은 페이지에 붙여넣은 경우
+addEventListener("hashchange", ()=>{ if (DATA){ readURL(); render(); } });
+
+// ---------- 병원 상세 ----------
+// 강남언니·바비톡 둘 다 병원 페이지가 있는데 우리는 지도 팝업(3건 요약)뿐이었다.
+// 지도 핀이나 표의 '이 병원만' 을 누르면 그 병원의 주소·부가세 표기·수집일·분류 분포를 한 칸에 모아 준다.
+function clinicBox(){
+  const box = document.getElementById("clinic");
+  if (pick === null){ box.textContent = ""; return; }
+  const c = C[pick];
+  const mine = rows.filter(r => r.ci === pick);
+  const cats = new Map();
+  mine.forEach(r => { if (r.ct >= 0) cats.set(r.ct, (cats.get(r.ct) || 0) + 1); });
+  const catStr = [...cats.entries()].sort((a,b)=> b[1]-a[1]).slice(0, 6)
+    .map(([k, n]) => `${esc(CTS[k])} ${n}`).join(" · ");
+  const prices = mine.map(r => r.p).sort((a,b)=> a-b);
+  const nchg = mine.filter(r => r.ch).length;
+  box.innerHTML = `<div class="cbox"><h3>${esc(c.l)}` +
+    (c.b >= 0 && BDS[c.b] ? ` <span class="tag">${esc(BDS[c.b])}</span>` : "") +
+    (c.v === "별도" ? ' <span class="tag vat">VAT 별도</span>' : "") + `</h3>` +
+    // 주소가 지역명으로 시작하면 "경기 안산시 · 경기 안산시 단원구 …" 처럼 두 번 찍힌다 — 주소만 쓴다
+    `<div class="meta"><b>${esc(c.a && c.a.startsWith(c.r) ? c.a : c.r + (c.a ? " · " + c.a : ""))}</b>` +
+    `<br>시술 <b>${mine.length.toLocaleString("ko-KR")}건</b>` +
+    (prices.length ? ` · ${fmt(prices[0])} ~ ${fmt(prices[prices.length-1])} · 중위 ${fmt(prices[Math.floor(prices.length/2)])}` : "") +
+    (nchg ? ` · <b>가격 변동 ${nchg}건</b>` : "") +
+    `<br>${esc(c.d)} 수집` + (c.d !== DATA.date ? ` <span class="tag">최신 수집일과 다름</span>` : "") +
+    (catStr ? `<br>${catStr}` : "") +
+    (c.u ? `<br><a href="${esc(c.u)}" target="_blank" rel="noopener noreferrer">병원 홈페이지에서 원문 보기</a>` : "") +
+    ` · <button class="pickbtn" type="button" data-unpick="1">이 병원만 보기 해제</button>` +
+    `</div></div>`;
+}
+document.addEventListener("click", e=>{
+  if (e.target.closest("[data-unpick]")){ pick = null; render(); return; }
+  const b = e.target.closest("button[data-pick2]");
+  if (b){ pick = +b.dataset.pick2; cmp = null; render(); window.scrollTo({top:0, behavior:"smooth"}); }
+});
+
 // ---------- 렌더 ----------
 function render(){
   // 본품(옵션가 아님) 먼저, 그 안에서 가격 낮은 순 — 그래야 "이 시술 어디가 싼가"가 위에 온다
   const list = filtered().sort(SORTS[sortBy] || SORTS.price);
   renderCats();
   renderChips();
+  clinicBox();
   renderCmp(list);
   drawMap(list);
   const nc = new Set(list.map(r=>r.ci)).size;
@@ -1135,6 +1234,7 @@ function render(){
       `<b>시술명을 검색</b>하거나 위의 <b>분류·지역·브랜드</b>를 고르거나 지도에서 <b>병원 핀</b>을 누르면 ` +
       `가격 낮은 순으로 보여줍니다.</p>`
     : table(list);
+  writeURL();
 }
 document.getElementById("q").addEventListener("input", e=>{
   q = e.target.value.trim().toLowerCase(); pick = null; render();
@@ -1164,6 +1264,7 @@ function boot(){
     `병원 <b>${C.length}곳</b> · 시술 <b>${DATA.it.length.toLocaleString("ko-KR")}건</b> · ${md(DATA.date)} 기준` +
     (noGeo ? ` · <span class="tag">좌표 미확인 ${noGeo}곳은 지도에 없고 표에만 있습니다</span>` : "");
   initBrand();
+  readURL();          // 브랜드 select 에 option 이 붙은 뒤여야 값을 세팅할 수 있다
   initMap();
   render();
 }

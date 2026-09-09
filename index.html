@@ -737,6 +737,9 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
 .cbox .meta b{color:var(--ink);font-weight:500}
 .pickbtn{border:0;background:none;color:var(--acc-ink);font:inherit;font-size:11px;cursor:pointer;padding:0 2px;
   text-decoration:underline;text-underline-offset:2px}
+.tag.stand{background:#fdf1e3;color:#8a5a1a;border-color:#eddcc4}
+.bwhy{font-size:11.5px;color:var(--ink2);line-height:1.7;margin:6px 0 0;padding:7px 9px;border-radius:8px;
+  background:var(--surface2, rgba(0,0,0,.03))}
 footer{margin-top:34px;padding-top:16px;border-top:1px solid var(--line);font-size:12px;color:var(--ink2);line-height:1.8}
 </style>
 
@@ -799,7 +802,7 @@ footer{margin-top:34px;padding-top:16px;border-top:1px solid var(--line);font-si
 //  · 인라인 모드: DATA_JSON 에 데이터가 박힌다(단일 파일이 필요할 때. build_public.py 의 BLEVIE_PUB_INLINE=1).
 // 분리 모드에서 JSON 을 못 받으면 조용히 빈 화면이 되지 않게 사유를 화면에 띄운다 —
 // 배포 쪽이 index.html 만 올리고 데이터 파일을 빼먹는 사고가 가장 흔하다.
-const DATA_URL = "data.json?v=2026-09-08";
+const DATA_URL = "data.json?v=2026-09-09";
 let DATA = /*__DATA_JSON__*/null;
 const fmt = n => n.toLocaleString("ko-KR") + "원";
 const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -838,6 +841,9 @@ function prepare(){
 }
 let q = "", sido = null, reg = null, pick = null, cmp = null, noTrial = true;
 let cat = null, brand = null, sortBy = "price", onlyChg = false;   // 분류·브랜드·정렬·가격변동만
+// 상시 가격표 기준 병원 제외(선택). 기본은 끄고 둔다 — 켜 두면 데이터가 조용히 사라진다.
+// 이 병원들의 가격이 틀린 게 아니라 '할인가가 아니다' 는 것이라, 감추기보다 표시하는 쪽이 맞다.
+let noStand = false;
 // pick = 지도에서 고른 병원, cmp = 비교 중인 시술 그룹, noTrial = 체험가(첫방문 1회성) 제외
 // HANDOVER 5절: 체험가(1회성)와 한정가(반복)는 같은 축에 섞지 않되 통합 축도 병행한다 —
 // 기본은 통합(태그로 구분)이고 이 토글로 체험가만 걷어낸다.
@@ -883,7 +889,8 @@ const md2 = d => d ? d.replace(/^\d{4}-0?(\d+)-0?(\d+)$/, "$1/$2") : "";
 function passExtra(r){
   return (cat === null || r.ct === cat)
       && (brand === null || C[r.ci].b === brand)
-      && (!onlyChg || !!r.ch);
+      && (!onlyChg || !!r.ch)
+      && (!noStand || C[r.ci].bs !== "상시가");
 }
 function filtered(){
   return rows.filter(r => (!q || r.nl.includes(q)) && passExtra(r)
@@ -918,11 +925,16 @@ function renderCats(){
   [...cnt.entries()].sort((a,b)=> b[1]-a[1]).forEach(([ci2, n]) =>
     mk(`${CTS[ci2]} ${n.toLocaleString("ko-KR")}`, cat === ci2, ()=>{ cat = (cat === ci2 ? null : ci2); render(); }));
   const nchg = base.filter(r => r.ch).length;
-  if (nchg){
+  const nStandC = new Set(base.filter(r => C[r.ci].bs === "상시가").map(r => r.ci)).size;
+  if (nchg || nStandC){
     const sep = document.createElement("span");
     sep.style.cssText = "opacity:.4;padding:0 4px"; sep.textContent = "|"; box.appendChild(sep);
-    mk(onlyChg ? `가격 변동만 ${nchg}` : `가격 변동 ${nchg}`, onlyChg, ()=>{ onlyChg = !onlyChg; render(); });
   }
+  if (nchg)
+    mk(onlyChg ? `가격 변동만 ${nchg}` : `가격 변동 ${nchg}`, onlyChg, ()=>{ onlyChg = !onlyChg; render(); });
+  if (nStandC)
+    mk(noStand ? `상시가 ${nStandC}곳 제외 중` : `상시가 기준 ${nStandC}곳`, noStand,
+       ()=>{ noStand = !noStand; render(); });
 }
 
 // ---------- 지역 칩 ----------
@@ -1046,6 +1058,7 @@ function table(list){
         `<td class="num">${r.o?Math.round((r.o-r.p)/r.o*100)+"%":"—"}</td>` +
         `<td>${c.u?`<a href="${esc(c.u)}" target="_blank" rel="noopener noreferrer">${esc(c.l)}</a>`:esc(c.l)}` +
         `${pick===null?` <button class="pickbtn" type="button" data-pick2="${r.ci}">이 병원만</button>`:""}` +
+        `${basisTag(c)}` +
         `${c.v==="별도"?' <span class="tag vat">VAT 별도</span>':""}` +
         `${c.d!==DATA.date?` <span class="tag" title="${c.d} 수집">${md(c.d)}</span>`:""}</td>` +
         `<td>${esc(c.r)}</td></tr>`;
@@ -1110,6 +1123,7 @@ function cmpTable(g){
       const r = e.r, c = C[r.ci];
       return `<tr><td class="num">${i+1}</td>` +
         `<td>${c.u?`<a href="${esc(c.u)}" target="_blank" rel="noopener noreferrer">${esc(c.l)}</a>`:esc(c.l)}` +
+        `${basisTag(c)}` +
         `${c.v==="별도"?' <span class="tag vat">VAT 별도</span>':""}` +
         `${c.d!==DATA.date?` <span class="tag" title="${c.d} 수집">${md(c.d)}</span>`:""}</td>` +
         `<td>${esc(c.r)}</td>` +
@@ -1122,6 +1136,39 @@ function cmpTable(g){
     `<p class="dealnote">병원 ${best.length}곳 · 단위당 ${esc(fmtUp(lo,un))} ~ ${esc(fmtUp(hi,un))}` +
     ` (${(hi/lo).toFixed(1)}배 차이) · <b>중위 ${esc(fmtUp(mid,un))}</b>.` +
     ` 최저값은 미끼 성격일 수 있어 중위와 함께 보세요. 부가세 표기가 없는 병원은 세전일 수 있어 그대로 비교되지 않습니다.</p>`;
+}
+
+// ---------- 가격 기준 배지 ----------
+// 등록 페이지가 상시 가격표인 병원은 그 병원만 정가 수준에 앉는다(실측: 시장 중위의 1.21배,
+// 최대 1.59배). 값을 고칠 방법은 없으니 **어떤 기준의 값인지 밝힌다**.
+const BASIS_LABEL = {"상시가": "상시가", "혼재": "일부 상시가", "법정고지가": "법정 고지가"};
+function basisTag(c){
+  if (!c.bs) return "";
+  const t = BASIS_LABEL[c.bs] || c.bs;
+  const ti = c.bs === "상시가" ? "이 병원 등록 페이지는 상시 가격표입니다 — 이벤트 할인가가 아닙니다"
+    : (c.bs === "혼재" ? `이벤트가와 상시 가격표가 섞여 있습니다${c.bp != null ? ` (이벤트가 약 ${Math.round(100*c.bp)}%)` : ""}`
+    : "의료법 제45조의2 비급여 진료비용 고지가입니다");
+  return ` <span class="tag stand" title="${esc(ti)}">${esc(t)}</span>`;
+}
+
+// ---------- 가격 성격(이벤트가 여부) 지표 ----------
+// 우리가 싣는 대표 가격은 병원이 게시한 **판매가**다(정가가 아니다). 그 사실이 화면에 없었다.
+// 근거는 데이터 안에 있다 — 정가가 함께 적혀 있고 판매가가 그보다 낮다면 그 값은 할인가다.
+// 항목 이름에 '이벤트' 같은 말이 없어도 마찬가지다(실측: '정규' 티어도 정가 표기 79.5%, 할인 중위 44%).
+function discStat(list){
+  const withO = list.filter(r => r.o && r.o > r.p);
+  if (!list.length) return null;
+  const ds = withO.map(r => 1 - r.p / r.o).sort((a,b)=> a-b);
+  return {n: list.length, k: withO.length, share: withO.length / list.length,
+          md: ds.length ? ds[Math.floor(ds.length/2)] : null};
+}
+function discText(st, c){
+  if (!st || !st.k){
+    // 이벤트가로 확인된 병원인데 정가를 안 적는 경우가 있다. 그걸 '할인 여부 모름' 이라고 하면 틀린다.
+    if (c && c.bn) return "이벤트가 기준이지만 병원이 할인 전 가격을 적지 않아 할인율은 알 수 없습니다";
+    return "정가 표기가 없어 할인 여부를 알 수 없습니다";
+  }
+  return `정가 함께 표기 ${Math.round(100*st.share)}% · 할인율 중위 ${Math.round(100*st.md)}%`;
 }
 
 // ---------- 공유 가능한 URL ----------
@@ -1145,6 +1192,7 @@ function writeURL(){
   if (cmp) p.set("cmp", gLabel(cmp));
   if (sortBy !== "price") p.set("sort", sortBy);
   if (onlyChg) p.set("chg", "1");
+  if (noStand) p.set("nostand", "1");
   if (!noTrial) p.set("trial", "1");        // 기본이 '체험가 제외' 라 켠 경우만 싣는다
   // URLSearchParams 는 공백을 '+' 로 쓴다. 읽을 때는 둘 다 공백으로 풀리지만, 메신저에 붙여넣으면
   // '+' 가 그대로 보이거나 링크 인식에서 잘리는 곳이 있다 — 공유용이라 %20 으로 바꿔 둔다.
@@ -1174,6 +1222,7 @@ function readURL(){
   sortBy = SORTS[g("sort")] ? g("sort") : "price";
   document.getElementById("sort").value = sortBy;
   onlyChg = g("chg") === "1";
+  noStand = g("nostand") === "1";
   noTrial = g("trial") !== "1";
 }
 // 사용자가 주소창의 해시를 직접 바꾸거나 링크를 같은 페이지에 붙여넣은 경우
@@ -1201,11 +1250,20 @@ function clinicBox(){
     `<br>시술 <b>${mine.length.toLocaleString("ko-KR")}건</b>` +
     (prices.length ? ` · ${fmt(prices[0])} ~ ${fmt(prices[prices.length-1])} · 중위 ${fmt(prices[Math.floor(prices.length/2)])}` : "") +
     (nchg ? ` · <b>가격 변동 ${nchg}건</b>` : "") +
+    `<br>${discText(discStat(mine), c)}` +
     `<br>${esc(c.d)} 수집` + (c.d !== DATA.date ? ` <span class="tag">최신 수집일과 다름</span>` : "") +
     (catStr ? `<br>${catStr}` : "") +
     (c.u ? `<br><a href="${esc(c.u)}" target="_blank" rel="noopener noreferrer">병원 홈페이지에서 원문 보기</a>` : "") +
     ` · <button class="pickbtn" type="button" data-unpick="1">이 병원만 보기 해제</button>` +
-    `</div></div>`;
+    `</div>` +
+    (c.bs ? `<p class="bwhy"><b>가격 기준: ${esc(BASIS_LABEL[c.bs] || c.bs)}</b>` +
+      (c.bs === "상시가" ? " — 등록 페이지가 상시 가격표라 이 값들은 이벤트 할인가가 아닙니다. 다른 병원의 이벤트가와 나란히 보면 비싸 보일 수 있습니다."
+        : c.bs === "혼재" ? ` — 이벤트가와 상시 가격표가 섞여 있습니다${c.bp != null ? ` (이벤트가 약 ${Math.round(100*c.bp)}%)` : ""}.`
+        : " — 의료법 제45조의2 비급여 진료비용 고지가입니다.") +
+      (c.bw ? `<br>근거: ${esc(c.bw)}` : "") +
+      (DATA.basis && DATA.basis.date ? `<br>${esc(DATA.basis.date)} 페이지 원문 확인` : "") +
+      `</p>` : "") +
+    `</div>`;
 }
 document.addEventListener("click", e=>{
   if (e.target.closest("[data-unpick]")){ pick = null; render(); return; }
@@ -1228,7 +1286,7 @@ function render(){
     (q ? ` · '<b>${esc(q)}</b>' 검색` : "") + (pick!==null ? ` · <b>${esc(C[pick].l)}</b>만 보는 중` : "");
   // 아무것도 안 좁힌 채 전체를 가격순으로 펼치면 '점 제거 100원'류만 200줄 나온다 —
   // 그때만 안내를 띄운다. 분류·브랜드·가격변동 필터도 '좁힌 것'으로 센다(예: 가격 변동 507건은 표로 보여야 한다).
-  const narrowed = !!q || !!reg || pick !== null || cat !== null || brand !== null || onlyChg;
+  const narrowed = !!q || !!reg || pick !== null || cat !== null || brand !== null || onlyChg || noStand;
   document.getElementById("tbl").innerHTML = (!narrowed && list.length > 200)
     ? `<p class="secdesc">병원 ${nc}곳 · ${list.length.toLocaleString("ko-KR")}건입니다. ` +
       `<b>시술명을 검색</b>하거나 위의 <b>분류·지역·브랜드</b>를 고르거나 지도에서 <b>병원 핀</b>을 누르면 ` +
@@ -1254,8 +1312,13 @@ function initBrand(){
       sel.appendChild(o);
     });
 }
-document.getElementById("src").innerHTML =
-  `가격은 각 병원 홈페이지 게시분을 하루 한 번 자동 수집합니다. 병원마다 갱신 주기가 달라 표의 날짜 표시를 확인하세요.`;
+function srcNote(){
+  const st = discStat(rows);
+  document.getElementById("src").innerHTML =
+    `표에 적힌 값은 <b>병원이 홈페이지에 게시한 이벤트 판매가</b>입니다 — 정가가 아닙니다. ` +
+    `전체 ${rows.length.toLocaleString("ko-KR")}건 중 ${discText(st)}. ` +
+    `가격은 하루 한 번 자동 수집하며, 병원마다 갱신 주기가 달라 표의 날짜 표시를 확인하세요.`;
+}
 
 function boot(){
   prepare();
@@ -1263,6 +1326,7 @@ function boot(){
   document.getElementById("sub").innerHTML =
     `병원 <b>${C.length}곳</b> · 시술 <b>${DATA.it.length.toLocaleString("ko-KR")}건</b> · ${md(DATA.date)} 기준` +
     (noGeo ? ` · <span class="tag">좌표 미확인 ${noGeo}곳은 지도에 없고 표에만 있습니다</span>` : "");
+  srcNote();
   initBrand();
   readURL();          // 브랜드 select 에 option 이 붙은 뒤여야 값을 세팅할 수 있다
   initMap();

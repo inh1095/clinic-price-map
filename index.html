@@ -802,7 +802,7 @@ footer{margin-top:34px;padding-top:16px;border-top:1px solid var(--line);font-si
 //  · 인라인 모드: DATA_JSON 에 데이터가 박힌다(단일 파일이 필요할 때. build_public.py 의 BLEVIE_PUB_INLINE=1).
 // 분리 모드에서 JSON 을 못 받으면 조용히 빈 화면이 되지 않게 사유를 화면에 띄운다 —
 // 배포 쪽이 index.html 만 올리고 데이터 파일을 빼먹는 사고가 가장 흔하다.
-const DATA_URL = "data.json?v=2026-09-15";
+const DATA_URL = "data.json?v=2026-09-17";
 let DATA = /*__DATA_JSON__*/null;
 const fmt = n => n.toLocaleString("ko-KR") + "원";
 const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));

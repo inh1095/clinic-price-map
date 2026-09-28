@@ -809,7 +809,7 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">"
 const md = d => d ? d.replace(/^\d{4}-0?(\d+)-0?(\d+)$/, "$1/$2") : "";
 
 // ---------- 데이터 정리 ----------
-let C = [], rows = [], regs = [];
+let C = [], rows = [], regs = [], BYCI = [];
 let CNS = [], UNS = [], ARS = [], DVS = [], TRS = [], CTS = [], BDS = [], DTS = [], PKG = -1, HOE = -1;
 // '[울쎄라 시술 시 옵션가] 아쿠아필' 처럼 접두에서만 걸린 항목은 그 시술 본품이 아니다 —
 // 지도 색·최저 표시는 본품이 있으면 본품만 쓴다(옵션가가 싸서 병원이 싸 보이는 착시 방지).
@@ -837,6 +837,10 @@ function prepare(){
     return r;
   });
   C.forEach((c,i)=>{ c.i = i; });
+  // 병원 → 항목 인덱스(rows 순서). 지도 팝업·병원 상세가 병원마다 전체 항목을 다시 훑던 것
+  // (병원 435 × 항목 53k ≈ 2,300만 회 비교, CPU 4x 에서 3초+)을 로드 시 한 번 묶어 재사용한다.
+  BYCI = C.map(()=>[]);
+  rows.forEach((r,i)=>{ r.i = i; BYCI[r.ci].push(i); });
   regs = [...new Set(C.map(c=>c.r))].sort((a,b)=>a.localeCompare(b,"ko"));
 }
 let q = "", sido = null, reg = null, pick = null, cmp = null, noTrial = true;
@@ -996,6 +1000,10 @@ function drawMap(list){
   const show = v => useUp ? fmtUp(v, uni) : fmt(v);
   const best = new Map();
   src.forEach(r => { const b = best.get(r.ci); if (b===undefined || val(r) < b) best.set(r.ci, val(r)); });
+  // src 안 위치(없으면 -1). 병원별 항목은 BYCI 로 꺼내고, 같은 값끼리는 src 순서를 지켜
+  // 예전 src.filter(r=>r.ci===ci).sort(val) 와 같은 순서를 낸다(sort 는 안정 정렬).
+  const pos = new Int32Array(rows.length).fill(-1);
+  src.forEach((r,k) => { pos[r.i] = k; });
   const vals = [...best.values()].sort((a,b)=>a-b);
   const t1 = vals[Math.floor(vals.length/3)], t2 = vals[Math.floor(vals.length*2/3)];
   const col = v => (!(q || useUp) || vals.length < 6) ? "#7A6C73" : (v <= t1 ? "#177245" : (v >= t2 ? "#B3372B" : "#8A6100"));
@@ -1007,7 +1015,8 @@ function drawMap(list){
     const m = L.circleMarker([c.lat, c.lng], {
       radius: pick===ci ? 10 : 7, color:"#fff", weight:1.5, fillColor:col(metric), fillOpacity:.9
     }).addTo(layer);
-    const mine = src.filter(r=>r.ci===ci).sort((a,b)=>val(a)-val(b));
+    const mine = BYCI[ci].filter(i=>pos[i]>=0).map(i=>rows[i])
+      .sort((a,b)=>val(a)-val(b) || pos[a.i]-pos[b.i]);
     const items = mine.slice(0,3);
     m.bindPopup(`<b>${esc(c.l)}</b> <span class="tag">${esc(c.r)}</span>` +
       (c.v==="별도" ? ' <span class="tag vat">VAT 별도</span>' : "") +
@@ -1236,7 +1245,7 @@ function clinicBox(){
   const box = document.getElementById("clinic");
   if (pick === null){ box.textContent = ""; return; }
   const c = C[pick];
-  const mine = rows.filter(r => r.ci === pick);
+  const mine = BYCI[pick].map(i => rows[i]);
   const cats = new Map();
   mine.forEach(r => { if (r.ct >= 0) cats.set(r.ct, (cats.get(r.ct) || 0) + 1); });
   const catStr = [...cats.entries()].sort((a,b)=> b[1]-a[1]).slice(0, 6)
@@ -1285,7 +1294,8 @@ function render(){
   const nc = new Set(list.map(r=>r.ci)).size;
   document.getElementById("desc").innerHTML =
     `<b>${list.length.toLocaleString("ko-KR")}건</b> · 병원 ${nc}곳` +
-    (q ? ` · '<b>${esc(q)}</b>' 검색` : "") + (pick!==null ? ` · <b>${esc(C[pick].l)}</b>만 보는 중` : "");
+    (q ? ` · '<b>${esc(q)}</b>' 검색` : "") + (pick!==null ? ` · <b>${esc(C[pick].l)}</b>만 보는 중` : "") +
+    (DATA.gx ? ` · 옵션·비시술 ${DATA.gx.toLocaleString("ko-KR")}건 제외` : "");
   // 아무것도 안 좁힌 채 전체를 가격순으로 펼치면 '점 제거 100원'류만 200줄 나온다 —
   // 그때만 안내를 띄운다. 분류·브랜드·가격변동 필터도 '좁힌 것'으로 센다(예: 가격 변동 507건은 표로 보여야 한다).
   const narrowed = !!q || !!reg || pick !== null || cat !== null || brand !== null || onlyChg || noStand;
